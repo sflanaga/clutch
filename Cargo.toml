@@ -1,0 +1,48 @@
+[package]
+name = "clutch"
+version = "0.1.0"
+authors = ["Steve Flanagan <stevemflanagan@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+#debug = false
+#debug-assertions = false
+# lto does help but not by much with pcre2
+#lto = true
+#codegen-units=1
+#opt-level = 3
+panic = 'abort'  # does cleanup upon panics
+trustflags = ["-C", "target-cpu=native"]
+
+[[bin]]
+name = "clutch"
+path = "src/main.rs"
+
+[[bin]]
+name = "quicky"
+path = "src/quicky.rs"
+
+[[bin]]
+name = "rcref_ex"
+path = "src/rcref_ex.rs"
+
+[[bin]]
+name = "weakness"
+path = "src/weakness.rs"
+
+[[bin]]
+name = "dual_own"
+path = "src/dual_own.rs"
+
+[dependencies]
+num="0.2.0"
+snafu = "0.6.8"
+anyhow = "1.0.31"
+num-format = "0.4.0"
+num-traits = "0.2.12"
+backtrace = "0.3.49"
+color-backtrace = "0.4.2"
