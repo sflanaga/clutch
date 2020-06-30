@@ -1,10 +1,12 @@
+#![allow(dead_code)]
+
 use std::fmt;
 
 //
 // calc some machine specific constants
 const fn bytelen_to_shift() -> usize {
-    const byte_to_shiftta: [usize;8] = [3,4,0,5,0,0,0,6];
-    let x = byte_to_shiftta[std::mem::size_of::<usize>()-1];
+    const BYTE_TO_SHIFTTA: [usize;8] = [3,4,0,5,0,0,0,6];
+    let x = BYTE_TO_SHIFTTA[std::mem::size_of::<usize>()-1];
     x
 }
 
@@ -60,7 +62,7 @@ impl BitSet {
         }
     }
 
-    pub fn get(self: &mut Self, idx: usize) -> bool {
+    pub fn get(self: &Self, idx: usize) -> bool {
         let tru_idx = idx >> SHIFT_DIV; // div 64
         let tru_bit = 1 << (idx & IDX_MASK);
         // println!("get at {} tru_idx: {}  tru_bit: {:x}", idx, tru_idx, tru_bit);
@@ -74,6 +76,10 @@ impl BitSet {
         println!("cap: {}", self.vec.capacity());
         let s = std::mem::size_of_val(&self.vec) + std::mem::size_of::<usize>() * self.vec.capacity();
         s
+    }
+
+    pub fn clear(self: &mut Self) {
+        self.vec.iter_mut().for_each( |x| {*x = 0;});
     }
 }
 
