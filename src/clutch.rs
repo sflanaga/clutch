@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
@@ -8,11 +9,12 @@ use std::fmt::Formatter;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use anyhow::{anyhow, Result};
+use snafu::Backtrace;
 
 use crate::bitset::BitSet;
 use crate::clutch::OmType::{TypeF64, TypeU32};
-use snafu::Backtrace;
-const RESIZE_INC: usize = 8usize;
+
+pub const RESIZE_INC: usize = 8usize;
 
 type GroupIdx = u16;
 
@@ -25,6 +27,18 @@ pub enum OmType {
     TypeF32 = 5,
     TypeF64 = 6,
     TypeString = 7,
+}
+
+impl std::fmt::Display for OmType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let s = match self {
+            TypeF64 => "f64",
+            TypeU32 => "u32",
+            String => "str",
+            _ => "unknown",
+        };
+        write!(f,"{}",  &s)
+    }
 }
 
 #[derive(Debug)]
@@ -277,10 +291,10 @@ impl ClutchStore {
 
     pub fn find_or_new_group(self: &mut Self, group: &str) -> &mut OmGroup {
         if let Some(idx) = self.group_map.get(group) {
-            println!("GRP FOUND");
+//            println!("GRP FOUND");
             self.groups.get_mut(*idx as usize).expect("Inconsistent structure error: found a group in map but not in vector")
         } else {
-            println!("NEW GROUP");
+//            println!("NEW GROUP");
             self.new_group(group)
         }
     }
@@ -297,7 +311,7 @@ impl ClutchStore {
         self.groups.get_mut(idx as usize)
     }
 
-    pub fn add_to_clutch<F>(self: &mut Self, key: &ClutchKey, mut f: F) -> (u64,u64)
+    pub fn add_to_clutch<F>(self: &mut Self, key: &ClutchKey, mut f: F) -> (u64, u64)
         where F: FnMut(&mut OmGroup, &mut ClutchData) -> u64
     {
         let mut add_key = 0;
@@ -400,7 +414,6 @@ impl ClutchData {
 }
 
 pub fn dump(cs: &ClutchStore, first_last: bool) {
-
     let mut at = 0;
     for (ck, cd) in &cs.clutches {
         at += 1;
@@ -417,10 +430,15 @@ pub fn dump(cs: &ClutchStore, first_last: bool) {
                 }
             }
 
-            print!("c: {}/{}  ", non_null, null);
-            for (id, meta) in &g.om_map {
-                print!("{}:{},", id, cd.get_value(&meta));
-            }
+            print!("\tc: {}/{}  ", non_null, null);
+            print!("{}",
+                   &g.om_map.iter().map(|x|
+                       format!("{}:{} {}", x.0, cd.get_value(x.1), &x.1.kind)).
+                       collect::<Vec<_>>().join(", "));
+
+            // for (id, meta) in &g.om_map {
+            //     print!("{}:{},", id, cd.get_value(&meta));
+            // }
             println!("}}");
         }
     }
