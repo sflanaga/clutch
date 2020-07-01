@@ -55,7 +55,7 @@ fn main() {
                         let (new_row, new_om_count) = cs.add_to_clutch(&key, |group, data| {
                             let mut count = 0;
                             for om_num in 1..=cli.oms {
-                                if cli.om_types & crate::cli::TU32 > 0 {
+                                if cli.types & crate::cli::TU32 > 0 {
                                     let id = om_num + 1 + pass * 10000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 1 {
                                         if cli.verbose > 1 {
@@ -64,7 +64,7 @@ fn main() {
                                         count += eval_result(&key, data.add_om_u32(false, group, id, id * 2));
                                     }
                                 }
-                                if cli.om_types & crate::cli::TF64 > 0 {
+                                if cli.types & crate::cli::TF64 > 0 {
                                     let id = om_num + 1 + pass * 10000 + 100000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 0 {
                                         if cli.verbose > 1 {
