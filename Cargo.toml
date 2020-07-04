@@ -16,7 +16,7 @@ panic = 'abort'
 #codegen-units=1
 #opt-level = 3
 panic = 'abort'  # does cleanup upon panics
-trustflags = ["-C", "target-cpu=native"]
+#trustflags = ["-C", "inline-threshold=0"]
 
 [[bin]]
 name = "clutch"
@@ -39,6 +39,7 @@ name = "dual_own"
 path = "src/dual_own.rs"
 
 [dependencies]
+bit-vec = "0.6"
 num="0.2.0"
 snafu = "0.6.8"
 anyhow = "1.0.31"
@@ -47,3 +48,5 @@ num-traits = "0.2.12"
 backtrace = "0.3.49"
 color-backtrace = "0.4.2"
 structopt = "0.3.15"
+crossbeam = "0.7.3"
+chrono = "0.4.12"

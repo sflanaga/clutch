@@ -7,7 +7,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-
+use bit_vec::BitVec;
 use anyhow::{anyhow, Result};
 use snafu::Backtrace;
 
@@ -75,7 +75,7 @@ pub struct OmMeta {
 pub struct OmGroup {
     pub idx: GroupIdx,
     pub group: String,
-    pub om_map: BTreeMap<u32, OmMeta>,
+    pub om_map: HashMap<u32, OmMeta>,
     pub om32_slots: usize,
     pub om64_slots: usize,
     pub omstr_slots: usize,
@@ -93,8 +93,8 @@ pub struct ClutchKey {
 
 #[derive(Debug)]
 pub struct ClutchData {
-    om_null32: BitSet,
-    om_null64: BitSet,
+    om_null32: BitVec,
+    om_null64: BitVec,
 
     om32: Vec<u32>,
     om64: Vec<u64>,
@@ -145,9 +145,13 @@ pub fn clear_stats() {
 }
 
 #[derive(Debug)]
-pub struct ClutchStore {
+pub struct ClutchMeta {
     groups: Vec<OmGroup>,
     group_map: BTreeMap<String, GroupIdx>,
+}
+
+#[derive(Debug)]
+pub struct ClutchStore {
     clutches: BTreeMap<ClutchKey, ClutchData>,
 }
 
@@ -184,6 +188,7 @@ impl ClutchKey {
 }
 
 impl OmGroup {
+    #[inline(always)]
     fn find_setup_meta_slot(&mut self, id: u32, kind: &OmType) -> usize {
         match kind {
             TypeU32 => {
@@ -257,28 +262,21 @@ impl PartialEq for ClutchKey {
         self.cmp(&other) == Ordering::Equal
     }
 }
-
-impl ClutchStore {
-    pub fn new() -> ClutchStore {
-        let mut cs = ClutchStore {
+impl ClutchMeta {
+    pub fn new() -> ClutchMeta {
+        let mut cm = ClutchMeta {
             groups: Vec::new(),
             group_map: BTreeMap::new(),
-            clutches: BTreeMap::new(),
         };
-        cs.new_group("BAD_ZERO_GROUP");
-        cs
+        cm.new_group("BAD_ZERO_GROUP");
+        cm
     }
-
-    pub fn clear_oms(&mut self) {
-        self.clutches.clear();
-    }
-
     pub fn new_group(self: &mut Self, group: &str) -> &mut OmGroup {
         let next_id = self.groups.len() as GroupIdx;
         let g = OmGroup {
             idx: next_id,
             group: String::from(group),
-            om_map: BTreeMap::new(),
+            om_map: HashMap::new(),
             om32_slots: 0,
             om64_slots: 0,
             omstr_slots: 0,
@@ -311,11 +309,20 @@ impl ClutchStore {
         self.groups.get_mut(idx as usize)
     }
 
-    pub fn add_to_clutch<F>(self: &mut Self, key: &ClutchKey, mut f: F) -> (u64, u64)
-        where F: FnMut(&mut OmGroup, &mut ClutchData) -> u64
-    {
+}
+impl ClutchStore {
+    pub fn new() -> ClutchStore {
+        ClutchStore {
+            clutches: BTreeMap::new(),
+        }
+    }
+
+    pub fn clear_oms(&mut self) {
+        self.clutches.clear();
+    }
+
+    pub fn add_to_clutch(self: &mut Self, o32: usize, o64: usize, key: ClutchKey) -> &mut ClutchData {
         let mut add_key = 0;
-        let group = self.groups.get_mut(key.groupidx as usize).unwrap();
         let val = if self.clutches.contains_key(&key) {
             inc_keys();
             //println!("KEY returning existing");
@@ -324,14 +331,12 @@ impl ClutchStore {
             //println!("KEY new ");
             add_key += 1;
             self.clutches.insert(ClutchKey::create_copy(&key),
-                                 ClutchData::new(group.om32_slots as usize,
-                                                 group.om64_slots as usize));
+                                 ClutchData::new(o32,
+                                                 o64 as usize));
             self.clutches.get_mut(&key).unwrap()
         };
 
-
-        let count = f(group, val);
-        (add_key, count)
+        val
     }
 
     pub fn clear_data(self: &mut Self) {
@@ -339,16 +344,14 @@ impl ClutchStore {
     }
     pub fn clear_all(self: &mut Self) {
         self.clutches.clear();
-        self.groups.clear();
-        self.group_map.clear();
     }
 }
 
 impl ClutchData {
     fn new(om32_size: usize, om64_size: usize) -> Self {
         ClutchData {
-            om_null32: BitSet::new(),
-            om_null64: BitSet::new(),
+            om_null32: BitVec::from_elem(om32_size, false),
+            om_null64: BitVec::from_elem(om32_size, false),
             om32: vec![0u32; om32_size],
             om64: vec![0u64; om64_size],
             om_str: vec![],
@@ -360,14 +363,14 @@ impl ClutchData {
     pub fn get_value(&self, meta: &OmMeta) -> OmValue {
         match meta.kind {
             TypeU32 => {
-                if self.om_null32.get(meta.slot) {
+                if self.om_null32[meta.slot] {
                     OmValue::U32(*self.om32.get(meta.slot).unwrap())
                 } else {
                     OmValue::NULL
                 }
             }
             TypeF64 => {
-                if self.om_null64.get(meta.slot) {
+                if self.om_null64[meta.slot] {
                     let tmp = *self.om64.get(meta.slot).unwrap();
                     OmValue::F64(unsafe { std::mem::transmute::<u64, f64>(tmp) })
                 } else {
@@ -377,14 +380,57 @@ impl ClutchData {
             _ => panic!("error in get value, kind not mapped"),
         }
     }
+    #[inline(always)]
+    pub fn is_32_set(&mut self, slot: usize) -> bool {
+        if self.om_null32.len() < slot+1 {
+            false
+        } else {
+            match self.om_null32.get(slot) {
+                None => false,
+                Some(b)=> b
+            }
+        }
+    }
+    #[inline(always)]
+    pub fn is_64_set(&mut self, slot: usize) -> bool {
+        if self.om_null64.len() < slot+1 {
+            false
+        } else {
+            match self.om_null64.get(slot) {
+                None => false,
+                Some(b)=> b
+            }
+        }
+    }
+    #[inline(always)]
+    pub fn set_64(&mut self, slot: usize) {
+        if self.om_null64.len() < slot+1 {
+            // println!("64 GROW TO {}", slot+1);
+            let growth = ((slot+1 / 32)+1)*32;
+            self.om_null64.grow(growth, false);
+        }
+        // println!("64 set slot {} with len: {}", slot, self.om_null64.len());
+        self.om_null64.set(slot, true);
+    }
 
+    #[inline(always)]
+    pub fn set_32(&mut self, slot: usize) {
+        if self.om_null32.len() < slot+1 {
+            let growth = ((slot+1 / 32)+1)*32;
+            self.om_null32.grow(growth, false);
+        }
+        // println!("32 set slot {} with len: {}", slot, self.om_null32.len());
+        self.om_null32.set(slot, true);
+    }
+
+    #[inline(always)]
     pub fn add_om_u32(self: &mut Self, overwrite: bool, group: &mut OmGroup, id: u32, val: u32) -> Result<()> {
         let slot = group.find_setup_meta_slot(id, &TypeU32);
 
-        if !overwrite && self.om_null32.get(slot) {
+        if !overwrite && self.is_32_set(slot) {
             Err(anyhow!("duplicate u32 OM id: {} val: {}", id,val))
         } else {
-            self.om_null32.set(slot, true);
+            self.set_32(slot);
             if self.om32.len() < slot + 1 {
                 inc_resizes();
                 self.om32.resize(slot + RESIZE_INC, 0);
@@ -394,31 +440,32 @@ impl ClutchData {
             Ok(())
         }
     }
-
+    #[inline(always)]
     pub fn add_om_f64(self: &mut Self, overwrite: bool, group: &mut OmGroup, id: u32, val: f64) -> Result<()> {
         let slot = group.find_setup_meta_slot(id, &TypeF64);
 
-        if !overwrite && self.om_null64.get(slot) {
+        if !overwrite && self.is_64_set(slot) {
             Err(anyhow!("duplicate f64 OM id: {} val: {}", id,val))
         } else {
-            self.om_null64.set(slot, true);
+            self.set_64(slot);
             if self.om64.len() < slot + 1 {
                 inc_resizes();
                 self.om64.resize(slot + RESIZE_INC, 0);
             }
             inc_oms();
-            self.om64[slot] = unsafe { std::mem::transmute::<f64, u64>(val) };
+
+            unsafe { self.om64[slot] =  std::mem::transmute::<f64, u64>(val) };
             Ok(())
         }
     }
 }
 
-pub fn dump(cs: &ClutchStore, first_last: bool) {
+pub fn dump(cm: &ClutchMeta, cs: &ClutchStore, first_last: bool) {
     let mut at = 0;
     for (ck, cd) in &cs.clutches {
         at += 1;
         if !first_last || at == 1 || at == cs.clutches.len() {
-            let g = cs.groups.get(ck.groupidx as usize).unwrap();
+            let g = cm.groups.get(ck.groupidx as usize).unwrap();
 
             println!("{} {{ group: {} key: {}  time: {} dur: {} os: {}", at, &g.group, ck.keys.join("|"), ck.time, ck.dur, ck.offset);
             let mut non_null = 0;
@@ -443,8 +490,8 @@ pub fn dump(cs: &ClutchStore, first_last: bool) {
         }
     }
     let mut meta_e = 0;
-    for g in &cs.groups {
+    for g in &cm.groups {
         meta_e += g.om_map.len();
     }
-    println!("g count: {}  g map entries {}  metas: {}", cs.groups.len(), cs.groups.len(), meta_e);
+    println!("g count: {}  g map entries {}  metas: {}", cm.groups.len(), cm.groups.len(), meta_e);
 }

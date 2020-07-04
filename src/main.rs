@@ -2,20 +2,24 @@
 #![allow(unused_imports)]
 
 use std::fmt::Display;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 use structopt::StructOpt;
 
 use clutch::*;
 
 use crate::cli::Cli;
+use std::rc::Rc;
+use crate::util::{StatTrack, PeriodicThread};
+use std::sync::atomic::Ordering;
 
 mod clutch;
 mod bitset;
 mod util;
 mod cli;
 
-fn eval_result<T>(key: &ClutchKey, res: Result<(), T>) -> u32
+
+fn eval_result<T>(res: Result<(), T>) -> u64
     where T: Display {
     match res {
         Ok(_) => {
@@ -23,7 +27,7 @@ fn eval_result<T>(key: &ClutchKey, res: Result<(), T>) -> u32
             1
         }
         Err(e) => {
-            println!("Error: key: {}  {}", key.to_string(), e);
+            println!("Error: {}", e);
             0
         }
     }
@@ -31,60 +35,75 @@ fn eval_result<T>(key: &ClutchKey, res: Result<(), T>) -> u32
 
 fn main() {
     let cli: Cli = crate::cli::Cli::from_args();
-
-    let mut cs = ClutchStore::new();
+    let mut cm = ClutchMeta::new();
     for iteration in 1..=cli.iterations {
+        let mut st =  StatTrack::new();
+        let mut row_stats = st.add_stat("Rows", 0);
+        let mut om_stats = st.add_stat("OMs", 0);
+        let mut ticker = PeriodicThread::new(Duration::from_secs(1));
+        ticker.start(move || {
+            st.print_stats();
+        });
+        let mut cs = ClutchStore::new();
+
         let mut om_count = 0u64;
         let mut row_count = 0u64;
         let start_t = std::time::Instant::now();
         for pass in 1..=cli.iterations {
             //println!("o: {}", o);
-            let g = cs.find_or_new_group("level1").idx;
+
+            let group = cm.find_or_new_group("level1");
             for k1 in 1..=cli.k1 {
                 //println!("i: {}", i);
                 for k2 in 1..=cli.k2 {
                     //println!("j: {}", j);
                     for k3 in 1..=cli.k3 {
                         //println!("k: {}", k);
-                        let mut v: Vec<String> = vec![];
-                        v.push(format!("{}", k1));
-                        v.push(format!("{}", k2));
-                        v.push(format!("{}", k3));
 
-                        let key = ClutchKey::new(g, v, 1960, 32, 0);
-                        let (new_row, new_om_count) = cs.add_to_clutch(&key, |group, data| {
-                            let mut count = 0;
+                        let g: &OmGroup = &group;
+                        let g_idx = g.idx as u16;
+                        let om32 = g.om32_slots;
+                        let om64 = g.om64_slots;
+                        //let key = ;
+                        {
+                            let mut v = vec![];
+                            v.push(format!("{}", k1));
+                            v.push(format!("{}", k2));
+                            v.push(format!("{}", k3));
+
+                            let data = cs.add_to_clutch(om32, om64, ClutchKey::new(g_idx, v, 1960, 32, 0));
                             for om_num in 1..=cli.oms {
                                 if cli.types & crate::cli::TU32 > 0 {
                                     let id = om_num + 1 + pass * 10000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 1 {
                                         if cli.verbose > 1 {
-                                            println!("u32 o: {} key: {} d: {}", pass, &key.to_string(), id);
+                                            //println!("u32 o: {} key: {} d: {}", pass, &vk.to_string(), id);
                                         }
-                                        count += eval_result(&key, data.add_om_u32(false, group, id, id * 2));
+                                        let tc = eval_result(data.add_om_u32(false, group, id, id * 2));
+                                        om_stats.fetch_add(tc as usize, Ordering::Relaxed);
+                                        om_count += tc;
                                     }
                                 }
                                 if cli.types & crate::cli::TF64 > 0 {
                                     let id = om_num + 1 + pass * 10000 + 100000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 0 {
                                         if cli.verbose > 1 {
-                                            println!("u32 o: {} key: {} d: {}", pass, &key.to_string(), id);
+                                            //println!("u32 o: {} key: {} d: {}", pass, &key.to_string(), id);
                                         }
-                                        count += eval_result(&key, data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
+                                        let tc = eval_result( data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
+                                        om_stats.fetch_add(tc as usize, Ordering::Relaxed);
+                                        om_count += tc;
                                     }
                                 }
                             }
-                            count as u64
-                        });
-                        om_count += new_om_count;
-                        row_count += new_row;
-                        if cli.verbose > 2 {
-                            dump(&cs, true);
+                            row_stats.fetch_add(1, Ordering::Relaxed);
+                            row_count += 1;
                         }
                     }
                 }
             }
-        }
+        } // pass loop
+        ticker.stop();
         {
             use crate::util::{comma, rate};
             let dur = start_t.elapsed();
@@ -95,19 +114,23 @@ fn main() {
                      rate(om_count, dur),
                      dur.as_secs_f64());
         }
-        print_clutch_stats();
+        {
+            print_clutch_stats();
 
-        dump(&cs, !cli.dump_full);
-        println!();
+            dump(&cm, &cs, !cli.dump_full);
+            println!();
 
-        if cli.pause {
-            let mut s = String::new();
-            std::io::stdin().read_line(&mut s).unwrap();
+            if cli.pause {
+                println!("Paused for user input <ENTER>");
+                let mut s = String::new();
+                std::io::stdin().read_line(&mut s).unwrap();
+                println!("Continuing...");
+            }
+            let clear_time = Instant::now();
+            cs.clear_oms();
+            clear_stats();
+            println!("cleared in {}", clear_time.elapsed().as_secs_f64());
+            println!();
         }
-        let clear_time = Instant::now();
-        cs.clear_oms();
-        clear_stats();
-        println!("cleared in {}", clear_time.elapsed().as_secs_f64());
-        println!();
     }
 }
