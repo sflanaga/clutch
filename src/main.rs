@@ -37,19 +37,25 @@ fn main() {
     let cli: Cli = crate::cli::Cli::from_args();
     let mut cm = ClutchMeta::new();
     for iteration in 1..=cli.iterations {
+
         let mut st =  StatTrack::new();
-        let mut row_stats = st.add_stat("Rows", 0);
-        let mut om_stats = st.add_stat("OMs", 0);
-        let mut ticker = PeriodicThread::new(Duration::from_secs(1));
-        ticker.start(move || {
-            st.print_stats();
-        });
+        let max_rows:usize = (&cli.passes * &cli.k1 * &cli.k2 * &cli.k3) as usize;
+        let max_oms:usize = max_rows * cli.oms as usize * {
+            let mut cnt = 0;
+            if cli.types & crate::cli::TU32> 0 { cnt += 1; }
+            if cli.types & crate::cli::TF64> 0 { cnt += 1; }
+            cnt
+        };
+        let mut row_stats = st.add_stat("Rows", 1, max_rows);
+        let mut om_stats = st.add_stat("OMs", 0, 0);
+        let mut ticker = st.start(Duration::from_secs(5));
+
         let mut cs = ClutchStore::new();
 
         let mut om_count = 0u64;
         let mut row_count = 0u64;
         let start_t = std::time::Instant::now();
-        for pass in 1..=cli.iterations {
+        for pass in 1..=cli.passes {
             //println!("o: {}", o);
 
             let group = cm.find_or_new_group("level1");

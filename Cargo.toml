@@ -14,7 +14,7 @@ panic = 'abort'
 # lto does help but not by much with pcre2
 #lto = true
 #codegen-units=1
-#opt-level = 3
+opt-level = 3
 panic = 'abort'  # does cleanup upon panics
 #trustflags = ["-C", "inline-threshold=0"]
 
