@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use num_traits::AsPrimitive;
 use chrono::{DateTime, Local};
 use std::any::Any;
+use cpu_time::ProcessTime;
 
 pub fn rate<T: AsPrimitive<f64>>(cnt: T, dur: Duration) -> Box<dyn Display> {
     let cnt_f = cnt.as_();
@@ -121,6 +122,7 @@ pub struct StatTrack {
     first: Instant,
     last: Instant,
     last_stats: Vec<usize>,
+    proc_time: ProcessTime,
 }
 
 impl StatTrack {
@@ -131,6 +133,7 @@ impl StatTrack {
             first: Instant::now(),
             last: Instant::now(),
             last_stats: Vec::new(),
+            proc_time: ProcessTime::now(),
         }
     }
 
@@ -141,6 +144,7 @@ impl StatTrack {
         }
         self.last = Instant::now();
         self.first = Instant::now();
+        self.proc_time = ProcessTime::now();
     }
 
     pub fn add_stat(&mut self, name: &str, verbosity: u32, max: usize) -> Arc<AtomicUsize> {
@@ -186,8 +190,11 @@ impl StatTrack {
                 print!(" {:.2}%", per);
             }
         }
-        self.last = now;
         println!();
+        if last {
+            println!("cpu time: {:.3}", self.proc_time.elapsed().as_secs_f64());
+        }
+        self.last = now;
     }
 
     pub fn start(mut self, dur: Duration) -> PeriodicThread {

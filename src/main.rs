@@ -12,6 +12,7 @@ use crate::cli::Cli;
 use std::rc::Rc;
 use crate::util::{StatTrack, PeriodicThread};
 use std::sync::atomic::Ordering;
+use cpu_time::ProcessTime;
 
 mod clutch;
 mod bitset;
@@ -36,6 +37,7 @@ fn eval_result<T>(res: Result<(), T>) -> u64
 fn main() {
     let cli: Cli = crate::cli::Cli::from_args();
     let mut cm = ClutchMeta::new();
+    let total_cpu = ProcessTime::now();
     for iteration in 1..=cli.iterations {
 
         let mut st =  StatTrack::new();
@@ -109,6 +111,9 @@ fn main() {
                 }
             }
         } // pass loop
+        let clear_time = Instant::now();
+        cs.clear_oms();
+        println!("cleared in {}", clear_time.elapsed().as_secs_f64());
         ticker.stop();
         {
             use crate::util::{comma, rate};
@@ -132,11 +137,9 @@ fn main() {
                 std::io::stdin().read_line(&mut s).unwrap();
                 println!("Continuing...");
             }
-            let clear_time = Instant::now();
-            cs.clear_oms();
             clear_stats();
-            println!("cleared in {}", clear_time.elapsed().as_secs_f64());
             println!();
         }
     }
+    println!("\n***  TOTAL CPU: {:.3}", total_cpu.elapsed().as_secs_f64());
 }
