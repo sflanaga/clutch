@@ -39,18 +39,17 @@ fn main() {
     let mut cm = ClutchMeta::new();
     let total_cpu = ProcessTime::now();
     for iteration in 1..=cli.iterations {
-
-        let mut st =  StatTrack::new();
-        let max_rows:usize = (&cli.passes * &cli.k1 * &cli.k2 * &cli.k3) as usize;
-        let max_oms:usize = max_rows * cli.oms as usize * {
+        let mut st = StatTrack::new();
+        let max_rows: usize = (&cli.passes * &cli.k1 * &cli.k2 * &cli.k3) as usize;
+        let max_oms: usize = max_rows * cli.oms as usize * {
             let mut cnt = 0;
-            if cli.types & crate::cli::TU32> 0 { cnt += 1; }
-            if cli.types & crate::cli::TF64> 0 { cnt += 1; }
+            if cli.types & crate::cli::TU32 > 0 { cnt += 1; }
+            if cli.types & crate::cli::TF64 > 0 { cnt += 1; }
             cnt
         };
         let mut row_stats = st.add_stat("Rows", 1, max_rows);
         let mut om_stats = st.add_stat("OMs", 0, 0);
-        let mut ticker = st.start(Duration::from_secs(5));
+        let mut ticker = st.start(Duration::from_millis(cli.interval_ms));
 
         let mut cs = ClutchStore::new();
 
@@ -98,7 +97,7 @@ fn main() {
                                         if cli.verbose > 1 {
                                             //println!("u32 o: {} key: {} d: {}", pass, &key.to_string(), id);
                                         }
-                                        let tc = eval_result( data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
+                                        let tc = eval_result(data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
                                         om_stats.fetch_add(tc as usize, Ordering::Relaxed);
                                         om_count += tc;
                                     }
@@ -118,7 +117,8 @@ fn main() {
         {
             use crate::util::{comma, rate};
             let dur = start_t.elapsed();
-            println!("DONE final count: {} rows & {}/sec || {} oms / {}/sec  {} secs total",
+            println!("DONE #{} final count: {} rows & {}/sec || {} oms / {}/sec  {} secs total",
+                     iteration,
                      comma(row_count),
                      rate(row_count, dur),
                      comma(om_count),

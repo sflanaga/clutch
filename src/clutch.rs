@@ -75,7 +75,7 @@ pub struct OmMeta {
 pub struct OmGroup {
     pub idx: GroupIdx,
     pub group: String,
-    pub om_map: HashMap<u32, OmMeta>,
+    pub om_map: BTreeMap<u32, OmMeta>,
     pub om32_slots: usize,
     pub om64_slots: usize,
     pub omstr_slots: usize,
@@ -220,6 +220,16 @@ impl OmGroup {
 
 impl Ord for ClutchKey {
     fn cmp(&self, other: &Self) -> Ordering {
+        let d = self.keys.len().cmp(&other.keys.len());
+        if d != Ordering::Equal { return d; }
+
+        for (l, r) in self.keys.iter().zip(other.keys.iter()) {
+            let d = l.as_bytes().cmp(r.as_bytes());
+            if d != Ordering::Equal {
+                return d;
+            }
+        }
+
         let d = self.groupidx.cmp(&other.groupidx);
         if d != Ordering::Equal { return d; }
         let d = self.time.cmp(&other.time);
@@ -229,15 +239,6 @@ impl Ord for ClutchKey {
         let d = self.dur.cmp(&other.dur);
         if d != Ordering::Equal { return d; }
 
-        let d = self.keys.len().cmp(&other.keys.len());
-        if d != Ordering::Equal { return d; }
-
-        for (l, r) in self.keys.iter().zip(other.keys.iter()) {
-            let d = l.cmp(r);
-            if d != Ordering::Equal {
-                return d;
-            }
-        }
         //eprintln!("error on equal {}  vs  {}", &self.to_string(), &other.to_string());
         //println!("{:?}", backtrace::Backtrace::new());
         Ordering::Equal
@@ -276,7 +277,7 @@ impl ClutchMeta {
         let g = OmGroup {
             idx: next_id,
             group: String::from(group),
-            om_map: HashMap::new(),
+            om_map: BTreeMap::new(),
             om32_slots: 0,
             om64_slots: 0,
             omstr_slots: 0,

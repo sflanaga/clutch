@@ -55,6 +55,10 @@ pub struct Cli {
     /// Verbosity - use more than one v for greater detail
     pub verbose: usize,
 
+    #[structopt(long, default_value("1000"))]
+    /// Interval in ms of stats print
+    pub interval_ms: u64,
+
     #[structopt(short = "n", default_value("0"))]
     /// every N OM (k3 mod N) will be null, 0 = never
     pub random_nulls: u32,

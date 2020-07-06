@@ -9,15 +9,17 @@ edition = "2018"
 panic = 'abort'
 
 [profile.release]
-debug = false
-debug-assertions = false
+#debug = false
+#debug-assertions = false
 # lto does help but not by much with pcre2
-lto = true
-codegen-units=1
-opt-level = 3
-panic = 'abort'  # does cleanup upon panics
-#trustflags = ["-C", "inline-threshold=0"]
+#lto = true
+#codegen-units=1
+#opt-level = 3
+#panic = 'abort'  # does cleanup upon panics
+#trustflags = ["-C", ""]
+#trustflags = ["-C", "target-cpu=native,inline-threshold=0"]
 trustflags = ["-C", "target-cpu=native"]
+#trustflags = ["-C", "inline-threshold=0"]
 
 
 [[bin]]
@@ -53,3 +55,4 @@ structopt = "0.3.15"
 crossbeam = "0.7.3"
 chrono = "0.4.12"
 cpu-time = "1.0.0"
+t1ha = "0.1.0"
