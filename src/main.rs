@@ -35,6 +35,13 @@ fn eval_result<T>(res: Result<(), T>) -> u64
 }
 
 fn main() {
+    if let Err(err) = clutch_perf_test() {
+        eprintln!("error: {}", &err);
+        std::process::exit(1);
+    }
+}
+
+fn clutch_perf_test() -> Result<(), Box<dyn std::error::Error>> {
     let cli: Cli = crate::cli::Cli::from_args();
     let mut cm = ClutchMeta::new();
     let total_cpu = ProcessTime::now();
@@ -56,13 +63,13 @@ fn main() {
         let mut om_count = 0u64;
         let mut row_count = 0u64;
         let start_t = std::time::Instant::now();
+        let group = cm.find_or_new_group("level1");
+        let mut c_key = ClutchKey::new(group.idx, String::with_capacity(32), 1960, 32, 0);
         for pass in 1..=cli.passes {
             //println!("o: {}", o);
-
-            let group = cm.find_or_new_group("level1");
             for k1 in 1..=cli.k1 {
                 //println!("i: {}", i);
-                for k2 in 1..=cli.k2 {
+                for k2 in (1..=cli.k2).rev() {
                     //println!("j: {}", j);
                     for k3 in 1..=cli.k3 {
                         //println!("k: {}", k);
@@ -73,18 +80,24 @@ fn main() {
                         let om64 = g.om64_slots;
                         //let key = ;
                         {
-                            let mut v = vec![];
-                            v.push(format!("{}", k1));
-                            v.push(format!("{}", k2));
-                            v.push(format!("{}", k3));
+                            use std::io::Write;
+                            use std::fmt::Write as FmtWrite;
+                            use std::io::Write as IoWrite;
+                            c_key.get_mut_key().clear();
+                            write!(&mut c_key.get_mut_key(), "{}\0{}\0{}", k1,k2,k3)?;
 
-                            let data = cs.add_to_clutch(om32, om64, ClutchKey::new(g_idx, v, 1960, 32, 0));
+                            // let mut v = vec![];
+                            // v.push(format!("{}", k1));
+                            // v.push(format!("{}", k2));
+                            // v.push(format!("{}", k3));
+
+                            let data = cs.add_to_clutch(om32, om64, &c_key);
                             for om_num in 1..=cli.oms {
                                 if cli.types & crate::cli::TU32 > 0 {
                                     let id = om_num + 1 + pass * 10000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 1 {
                                         if cli.verbose > 1 {
-                                            //println!("u32 o: {} key: {} d: {}", pass, &vk.to_string(), id);
+                                            println!("u32 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
                                         }
                                         let tc = eval_result(data.add_om_u32(false, group, id, id * 2));
                                         om_stats.fetch_add(tc as usize, Ordering::Relaxed);
@@ -95,7 +108,7 @@ fn main() {
                                     let id = om_num + 1 + pass * 10000 + 100000;
                                     if cli.random_nulls == 0 || k3 % cli.random_nulls == 0 {
                                         if cli.verbose > 1 {
-                                            //println!("u32 o: {} key: {} d: {}", pass, &key.to_string(), id);
+                                            println!("f64 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
                                         }
                                         let tc = eval_result(data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
                                         om_stats.fetch_add(tc as usize, Ordering::Relaxed);
@@ -110,6 +123,9 @@ fn main() {
                 }
             }
         } // pass loop
+        if cli.dump_level > 0 {
+            dump(&cm, &cs, !(cli.dump_level > 1));
+        }
         let clear_time = Instant::now();
         cs.clear_oms();
         println!("cleared in {}", clear_time.elapsed().as_secs_f64());
@@ -128,8 +144,6 @@ fn main() {
         {
             print_clutch_stats();
 
-            dump(&cm, &cs, !cli.dump_full);
-            println!();
 
             if cli.pause {
                 println!("Paused for user input <ENTER>");
@@ -140,6 +154,7 @@ fn main() {
             clear_stats();
             println!();
         }
-    }
+    } // iteration loop
     println!("\n***  TOTAL CPU: {:.3}", total_cpu.elapsed().as_secs_f64());
+    Ok(())
 }

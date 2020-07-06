@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, max};
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt::Display;
@@ -84,7 +84,7 @@ pub struct OmGroup {
 #[derive(Debug, Eq)]
 pub struct ClutchKey {
     pub groupidx: u16,
-    keys: Vec<String>,
+    keys: String,
     time: u64,
     dur: u32,
     offset: i32,
@@ -157,7 +157,7 @@ pub struct ClutchStore {
 
 
 impl ClutchKey {
-    pub fn new(groupidx: u16, keys: Vec<String>, time: u64, dur: u32, offset: i32) -> Self {
+    pub fn new(groupidx: u16, keys: String, time: u64, dur: u32, offset: i32) -> Self {
         ClutchKey {
             groupidx,
             keys,
@@ -167,19 +167,17 @@ impl ClutchKey {
         }
     }
     fn create_copy(self: &Self) -> Self {
-        ClutchKey {
-            groupidx: self.groupidx,
-            keys: self.keys.iter().map(|x| x.clone()).collect::<Vec<String>>(),
-            time: self.time,
-            dur: self.dur,
-            offset: self.offset,
-        }
+         Self::new(self.groupidx,self.keys.to_string(),self.time,self.dur,self.offset)
+    }
+
+    pub fn get_mut_key(&mut self) -> &mut String {
+        &mut self.keys
     }
 
     fn new_empty(self: &Self) -> Self {
         ClutchKey {
             groupidx: 0,
-            keys: Vec::new(),
+            keys: String::new(),
             time: 0,
             dur: 0,
             offset: 0,
@@ -220,15 +218,9 @@ impl OmGroup {
 
 impl Ord for ClutchKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        let d = self.keys.len().cmp(&other.keys.len());
-        if d != Ordering::Equal { return d; }
 
-        for (l, r) in self.keys.iter().zip(other.keys.iter()) {
-            let d = l.as_bytes().cmp(r.as_bytes());
-            if d != Ordering::Equal {
-                return d;
-            }
-        }
+        let d = self.keys.cmp(&other.keys);
+        if d != Ordering::Equal { return d; }
 
         let d = self.groupidx.cmp(&other.groupidx);
         if d != Ordering::Equal { return d; }
@@ -247,7 +239,7 @@ impl Ord for ClutchKey {
 
 impl ToString for ClutchKey {
     fn to_string(&self) -> String {
-        let s = self.keys.join("|");
+        let s = self.keys.replace('\0', ", ");
         format!("g:{} t:{} d:{} o:{} k:{}", self.groupidx, self.time, self.dur, self.offset, s)
     }
 }
@@ -322,20 +314,26 @@ impl ClutchStore {
         self.clutches.clear();
     }
 
-    pub fn add_to_clutch(self: &mut Self, o32: usize, o64: usize, key: ClutchKey) -> &mut ClutchData {
+    pub fn add_to_clutch(self: &mut Self, o32: usize, o64: usize, key: &ClutchKey) -> &mut ClutchData {
         let mut add_key = 0;
-        let val = if self.clutches.contains_key(&key) {
-            inc_keys();
-            //println!("KEY returning existing");
-            self.clutches.get_mut(&key).unwrap()
-        } else {
-            //println!("KEY new ");
-            add_key += 1;
-            self.clutches.insert(ClutchKey::create_copy(&key),
-                                 ClutchData::new(o32,
-                                                 o64 as usize));
-            self.clutches.get_mut(&key).unwrap()
-        };
+
+        let val = self.clutches
+            .entry(key.create_copy())
+            .or_insert(ClutchData::new(o32, o64));
+
+        // let val = if self.clutches.contains_key(&key) {
+        //     inc_keys();
+        //     //println!("KEY returning existing {}", key.to_string());
+        //     self.clutches.get_mut(&key).unwrap()
+        // } else {
+        //     add_key += 1;
+        //     let newkey = key.create_copy();
+        //     //println!("KEY new {}", newkey.to_string());
+        //     self.clutches.insert(key.create_copy(),
+        //                          ClutchData::new(o32,
+        //                                          o64 as usize));
+        //     self.clutches.get_mut(&key).unwrap()
+        // };
 
         val
     }
@@ -350,11 +348,13 @@ impl ClutchStore {
 
 impl ClutchData {
     fn new(om32_size: usize, om64_size: usize) -> Self {
+        let om32 = max(om32_size, RESIZE_INC);
+        let om64 = max(om64_size, RESIZE_INC);
         ClutchData {
             om_null32: BitVec::from_elem(om32_size, false),
             om_null64: BitVec::from_elem(om32_size, false),
-            om32: vec![0u32; om32_size],
-            om64: vec![0u64; om64_size],
+            om32: vec![0u32; om32],
+            om64: vec![0u64; om64],
             om_str: vec![],
         }
     }
@@ -463,12 +463,13 @@ impl ClutchData {
 
 pub fn dump(cm: &ClutchMeta, cs: &ClutchStore, first_last: bool) {
     let mut at = 0;
+    if cs.clutches.len() == 0 { eprintln!("HEY no clutches here?"); }
     for (ck, cd) in &cs.clutches {
         at += 1;
         if !first_last || at == 1 || at == cs.clutches.len() {
             let g = cm.groups.get(ck.groupidx as usize).unwrap();
 
-            println!("{} {{ group: {} key: {}  time: {} dur: {} os: {}", at, &g.group, ck.keys.join("|"), ck.time, ck.dur, ck.offset);
+            println!("{} {{ group: {} key: {}  time: {} dur: {} os: {}", at, &g.group, ck.keys.replace('\0', ", "), ck.time, ck.dur, ck.offset);
             let mut non_null = 0;
             let mut null = 0;
             for (id, meta) in &g.om_map {

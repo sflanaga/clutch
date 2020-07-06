@@ -43,9 +43,9 @@ pub struct Cli {
     /// --om-types u32,f64
     pub types: u32,
 
-    #[structopt(short,long)]
+    #[structopt(short, long, parse(from_occurrences))]
     /// write the full clutch set out - otherwise just first and last
-    pub dump_full: bool,
+    pub dump_level: u32,
 
     #[structopt(short="u")]
     /// pause for user input (ENTER) before going to next iteration
