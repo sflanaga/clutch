@@ -11,7 +11,7 @@ use bit_vec::BitVec;
 use anyhow::{anyhow, Result};
 use snafu::Backtrace;
 
-use crate::bitset::BitSet;
+//use crate::bitset::BitSet;
 use crate::clutch::OmType::{TypeF64, TypeU32};
 
 pub const RESIZE_INC: usize = 8usize;

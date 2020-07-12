@@ -15,10 +15,19 @@ use std::sync::atomic::Ordering;
 use cpu_time::ProcessTime;
 
 mod clutch;
-mod bitset;
 mod util;
 mod cli;
 
+
+#[cfg(target_family = "unix")]
+use jemallocator::Jemalloc;
+
+use std::sync::Arc;
+use std::thread::spawn;
+
+#[cfg(target_family = "unix")]
+#[global_allocator]
+pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 fn eval_result<T>(res: Result<(), T>) -> u64
     where T: Display {
@@ -35,18 +44,36 @@ fn eval_result<T>(res: Result<(), T>) -> u64
 }
 
 fn main() {
-    if let Err(err) = clutch_perf_test() {
+    if let Err(err) = run_test() {
         eprintln!("error: {}", &err);
         std::process::exit(1);
     }
 }
 
-fn clutch_perf_test() -> Result<(), Box<dyn std::error::Error>> {
-    let cli: Cli = crate::cli::Cli::from_args();
+fn run_test() -> Result<(), Box<dyn std::error::Error>> {
+    let cli= Arc::new(crate::cli::Cli::from_args());
+    let mut v = vec![];
+    for n in 0..cli.threads {
+        let cli = cli.clone();
+        let h = spawn(move || {
+            match clutch_perf_test(n, cli) {
+                Err(e) => println!("error: {}", e),
+                _ => {},
+            }
+        });
+        v.push(h);
+    }
+    for x in v {
+        x.join().unwrap();
+    }
+    Ok(())
+}
+
+fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cm = ClutchMeta::new();
     let total_cpu = ProcessTime::now();
     for iteration in 1..=cli.iterations {
-        let mut st = StatTrack::new();
+        let mut st = StatTrack::new(&n.to_string());
         let max_rows: usize = (&cli.passes * &cli.k1 * &cli.k2 * &cli.k3) as usize;
         let max_oms: usize = max_rows * cli.oms as usize * {
             let mut cnt = 0;

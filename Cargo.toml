@@ -42,6 +42,9 @@ path = "src/weakness.rs"
 name = "dual_own"
 path = "src/dual_own.rs"
 
+[target.'cfg(unix)'.dependencies]
+jemallocator = "0.3.2"
+
 [dependencies]
 bit-vec = "0.6"
 num="0.2.0"

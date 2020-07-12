@@ -13,6 +13,10 @@ structopt::clap::AppSettings::UnifiedHelpMessage
 ]),
 )]
 pub struct Cli {
+    #[structopt(long,default_value("1"))]
+    /// Number of threads to run at once
+    pub threads: u32,
+
     #[structopt(short,long,default_value("2"))]
     /// Number of times to run test
     pub iterations: u32,

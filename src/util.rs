@@ -117,6 +117,7 @@ impl Stat {
 }
 
 pub struct StatTrack {
+    name: String,
     stats: Vec<Stat>,
     reset: AtomicBool,
     first: Instant,
@@ -126,8 +127,9 @@ pub struct StatTrack {
 }
 
 impl StatTrack {
-    pub fn new() -> StatTrack {
+    pub fn new(name: &str) -> StatTrack {
         StatTrack {
+            name: name.into(),
             stats: Vec::new(),
             reset: AtomicBool::new(false),
             first: Instant::now(),
@@ -161,9 +163,9 @@ impl StatTrack {
     pub fn print_stats(&mut self, last: bool) {
         let now = Instant::now();
         if last {
-            print!("[{}] LAST  ", StatTrack::now_str());
+            print!("{} [{}] LAST  ", self.name, StatTrack::now_str());
         } else {
-            print!("[{}] ", StatTrack::now_str());
+            print!("{} [{}] ", self.name, StatTrack::now_str());
         }
         for (a_stat, last_stat) in self.stats.iter().zip(self.last_stats.iter_mut()) {
             let thisval = a_stat.stat.load(Ordering::Relaxed);
