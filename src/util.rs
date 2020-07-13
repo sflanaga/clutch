@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::{sync, thread, time};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Arc, Mutex};
@@ -162,10 +163,11 @@ impl StatTrack {
 
     pub fn print_stats(&mut self, last: bool) {
         let now = Instant::now();
+        let mut buff= String::with_capacity(256);
         if last {
-            print!("{} [{}] LAST  ", self.name, StatTrack::now_str());
+            write!(&mut buff, "{} [{}] LAST  ", self.name, StatTrack::now_str());
         } else {
-            print!("{} [{}] ", self.name, StatTrack::now_str());
+            write!(&mut buff, "{} [{}] ", self.name, StatTrack::now_str());
         }
         for (a_stat, last_stat) in self.stats.iter().zip(self.last_stats.iter_mut()) {
             let thisval = a_stat.stat.load(Ordering::Relaxed);
@@ -182,17 +184,17 @@ impl StatTrack {
             };
             *last_stat = thisval;
             match a_stat.verbosity {
-                0 => print!("  [{}: {}/s]", &a_stat.name, rate.to_formatted_string(&Locale::en)),
-                1 => print!("  [{}: {}, {}/s]", &a_stat.name, thisval.to_formatted_string(&Locale::en),
+                0 => write!(&mut buff, "  [{}: {}/s]", &a_stat.name, rate.to_formatted_string(&Locale::en)),
+                1 => write!(&mut buff, "  [{}: {}, {}/s]", &a_stat.name, thisval.to_formatted_string(&Locale::en),
                             rate.to_formatted_string(&Locale::en)),
-                _ => print!("   [{}: {}, {} | {}/s]", &a_stat.name, thisval.to_formatted_string(&Locale::en),
+                _ => write!(&mut buff, "   [{}: {}, {} | {}/s]", &a_stat.name, thisval.to_formatted_string(&Locale::en),
                             diff.to_formatted_string(&Locale::en), rate.to_formatted_string(&Locale::en)),
-            }
+            };
             if  per > 0f64 {
-                print!(" {:.2}%", per);
+                write!(&mut buff, " {:.2}%", per);
             }
         }
-        println!();
+        println!("{}", &buff);
         if last {
             println!("cpu time: {:.3}", self.proc_time.elapsed().as_secs_f64());
         }
