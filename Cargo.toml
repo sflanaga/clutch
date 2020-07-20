@@ -12,10 +12,10 @@ panic = 'abort'
 #debug = false
 #debug-assertions = false
 # lto does help but not by much with pcre2
-#lto = true
-#codegen-units=1
-#opt-level = 3
-#panic = 'abort'  # does cleanup upon panics
+lto = true
+codegen-units=1
+opt-level = 3
+panic = 'abort'  # does cleanup upon panics
 #trustflags = ["-C", ""]
 #trustflags = ["-C", "target-cpu=native,inline-threshold=0"]
 trustflags = ["-C", "target-cpu=native"]
@@ -30,22 +30,13 @@ path = "src/main.rs"
 name = "quicky"
 path = "src/quicky.rs"
 
-[[bin]]
-name = "rcref_ex"
-path = "src/rcref_ex.rs"
-
-[[bin]]
-name = "weakness"
-path = "src/weakness.rs"
-
-[[bin]]
-name = "dual_own"
-path = "src/dual_own.rs"
-
 [target.'cfg(unix)'.dependencies]
 jemallocator = "0.3.2"
+jemalloc-ctl = "0.3.3"
 
 [dependencies]
+nohash-hasher = "0.2.0"
+fnv = "1.0.7"
 bit-vec = "0.6"
 num="0.2.0"
 snafu = "0.6.8"

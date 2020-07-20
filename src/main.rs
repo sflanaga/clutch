@@ -18,16 +18,18 @@ mod clutch;
 mod util;
 mod cli;
 
+use crate::util::{comma, rate};
 
 #[cfg(target_family = "unix")]
 use jemallocator::Jemalloc;
 
-use std::sync::Arc;
-use std::thread::spawn;
-
 #[cfg(target_family = "unix")]
 #[global_allocator]
 pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
+use std::sync::Arc;
+use std::thread::spawn;
+
 
 fn eval_result<T>(res: Result<(), T>) -> u64
     where T: Display {
@@ -51,29 +53,45 @@ fn main() {
 }
 
 fn run_test() -> Result<(), Box<dyn std::error::Error>> {
-    let cli= Arc::new(crate::cli::Cli::from_args());
+    let cli = Arc::new(crate::cli::Cli::from_args());
     let mut v = vec![];
+    let total_cpu = ProcessTime::now();
+    let start_d = Instant::now();
     for n in 0..cli.threads {
         let cli = cli.clone();
         let h = spawn(move || {
             match clutch_perf_test(n, cli) {
-                Err(e) => println!("error: {}", e),
-                _ => {},
+                Err(e) => {println!("error: {}", e); (0,0)},
+                Ok(x) => x,
             }
         });
         v.push(h);
     }
+    let mut rows = 0;
+    let mut oms = 0;
     for x in v {
-        x.join().unwrap();
+        let v = x.join().unwrap();
+        rows += v.0;
+        oms += v.1;
     }
+    let delta = total_cpu.elapsed().as_secs_f64();
+
+    println!("rows: {}  oms: {}  tot cpu: {:.2}  runtime: {:.2}", rows, oms, delta, start_d.elapsed().as_secs_f64());
+    println!("rows rate: {}  oms rate: {}", comma(rows as f64/delta), comma(oms as f64/delta));
+
     Ok(())
 }
 
-fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Error>> {
+fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(u64,u64), Box<dyn std::error::Error>> {
+
+    let mut tot_oms = 0;
+    let mut tot_rows = 0;
+
     let mut cm = ClutchMeta::new();
     let total_cpu = ProcessTime::now();
     for iteration in 1..=cli.iterations {
-        let mut st = StatTrack::new(&n.to_string());
+
+
         let max_rows: usize = (&cli.passes * &cli.k1 * &cli.k2 * &cli.k3) as usize;
         let max_oms: usize = max_rows * cli.oms as usize * {
             let mut cnt = 0;
@@ -81,6 +99,8 @@ fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Err
             if cli.types & crate::cli::TF64 > 0 { cnt += 1; }
             cnt
         };
+
+        let mut st = StatTrack::new(&n.to_string());
         let mut row_stats = st.add_stat("Rows", 1, max_rows);
         let mut om_stats = st.add_stat("OMs", 0, 0);
         let mut ticker = st.start(Duration::from_millis(cli.interval_ms));
@@ -101,51 +121,47 @@ fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Err
                     for k3 in 1..=cli.k3 {
                         //println!("k: {}", k);
 
-                        let g: &OmGroup = &group;
-                        let g_idx = g.idx as u16;
-                        let om32 = g.om32_slots;
-                        let om64 = g.om64_slots;
-                        //let key = ;
-                        {
-                            use std::io::Write;
-                            use std::fmt::Write as FmtWrite;
-                            use std::io::Write as IoWrite;
-                            c_key.get_mut_key().clear();
-                            write!(&mut c_key.get_mut_key(), "{}\0{}\0{}", k1,k2,k3)?;
 
-                            // let mut v = vec![];
-                            // v.push(format!("{}", k1));
-                            // v.push(format!("{}", k2));
-                            // v.push(format!("{}", k3));
+                        use std::io::Write;
+                        use std::fmt::Write as FmtWrite;
+                        use std::io::Write as IoWrite;
+                        c_key.get_mut_key().clear();
+                        write!(&mut c_key.get_mut_key(), "{}\0{}\0{}", k1, k2, k3)?;
 
-                            let data = cs.add_to_clutch(om32, om64, &c_key);
-                            for om_num in 1..=cli.oms {
-                                if cli.types & crate::cli::TU32 > 0 {
-                                    let id = om_num + 1 + pass * 10000;
-                                    if cli.random_nulls == 0 || k3 % cli.random_nulls == 1 {
-                                        if cli.verbose > 1 {
-                                            println!("u32 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
-                                        }
-                                        let tc = eval_result(data.add_om_u32(false, group, id, id * 2));
-                                        om_stats.fetch_add(tc as usize, Ordering::Relaxed);
-                                        om_count += tc;
-                                    }
-                                }
-                                if cli.types & crate::cli::TF64 > 0 {
-                                    let id = om_num + 1 + pass * 10000 + 100000;
-                                    if cli.random_nulls == 0 || k3 % cli.random_nulls == 0 {
-                                        if cli.verbose > 1 {
-                                            println!("f64 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
-                                        }
-                                        let tc = eval_result(data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
-                                        om_stats.fetch_add(tc as usize, Ordering::Relaxed);
-                                        om_count += tc;
-                                    }
-                                }
-                            }
-                            row_stats.fetch_add(1, Ordering::Relaxed);
-                            row_count += 1;
+                        // let mut v = vec![];
+                        // v.push(format!("{}", k1));
+                        // v.push(format!("{}", k2));
+                        // v.push(format!("{}", k3));
+
+                        let data = cs.find_or_add_clutchdata(&group, &c_key);
+                        for om_num in 1..=cli.oms {
+                            // if cli.types & crate::cli::TU32 > 0 {
+                            let idbase = pass*1000;
+                            let id = idbase + om_num;
+                            //let id = om_num + 1 + pass * 10000;
+                            // if cli.random_nulls == 0 || k3 % cli.random_nulls == 1 {
+                            //     if cli.verbose > 1 {
+                            //         println!("u32 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
+                            //     }
+                            let tc = eval_result(data.add_om_u32(false, group, id, id * 2));
+                            om_stats.fetch_add(tc as usize, Ordering::Relaxed);
+                            om_count += tc;
+                            // }
+                            // }
+                            // if cli.types & crate::cli::TF64 > 0 {
+                            let id = om_num + idbase + 1000000; // om_num + 1 + pass * 10000 + 100000;
+                            // if cli.random_nulls == 0 || k3 % cli.random_nulls == 0 {
+                            //     if cli.verbose > 1 {
+                            //         println!("f64 o: {} key: {} d: {}", pass, &c_key.to_string(), id);
+                            //     }
+                            let tc = eval_result(data.add_om_f64(false, group, id, (id * 2) as f64 + 0.25 as f64));
+                            om_stats.fetch_add(tc as usize, Ordering::Relaxed);
+                            om_count += tc;
+                            // }
+                            // }
                         }
+                        row_stats.fetch_add(1, Ordering::Relaxed);
+                        row_count += 1;
                     }
                 }
             }
@@ -155,22 +171,22 @@ fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Err
         }
         let clear_time = Instant::now();
         cs.clear_oms();
-        println!("cleared in {}", clear_time.elapsed().as_secs_f64());
-        ticker.stop();
+        cm.optimize();
+        //println!("cleared in {}", clear_time.elapsed().as_secs_f64());
+        ticker.map(|mut t| t.stop());
         {
-            use crate::util::{comma, rate};
             let dur = start_t.elapsed();
-            println!("DONE #{} final count: {} rows & {}/sec || {} oms / {}/sec  {} secs total",
-                     iteration,
-                     comma(row_count),
-                     rate(row_count, dur),
-                     comma(om_count),
-                     rate(om_count, dur),
-                     dur.as_secs_f64());
+            // println!("DONE #{} itr: {} final count: {} rows & {}/sec || {} oms / {}/sec  {} secs total",
+            //          n,
+            //          iteration,
+            //          comma(row_count),
+            //          rate(row_count, dur),
+            //          comma(om_count),
+            //          rate(om_count, dur),
+            //          dur.as_secs_f64());
         }
         {
-            print_clutch_stats();
-
+            //print_clutch_stats();
 
             if cli.pause {
                 println!("Paused for user input <ENTER>");
@@ -178,10 +194,12 @@ fn clutch_perf_test(n: u32, cli: Arc<Cli>) -> Result<(), Box<dyn std::error::Err
                 std::io::stdin().read_line(&mut s).unwrap();
                 println!("Continuing...");
             }
-            clear_stats();
-            println!();
+            //clear_stats();
+            //println!();
         }
+        tot_oms += om_count;
+        tot_rows += row_count;
     } // iteration loop
-    println!("\n***  TOTAL CPU: {:.3}", total_cpu.elapsed().as_secs_f64());
-    Ok(())
+    //println!("\n***  TOTAL CPU: {:.3}", total_cpu.elapsed().as_secs_f64());
+    Ok((tot_rows, tot_oms))
 }

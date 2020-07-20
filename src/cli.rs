@@ -13,7 +13,7 @@ structopt::clap::AppSettings::UnifiedHelpMessage
 ]),
 )]
 pub struct Cli {
-    #[structopt(long,default_value("1"))]
+    #[structopt(short="t", long,default_value("1"))]
     /// Number of threads to run at once
     pub threads: u32,
 
@@ -41,7 +41,7 @@ pub struct Cli {
     /// OMs per record per keys and per passes
     pub oms: u32,
 
-    #[structopt(short,long,default_value("4"), parse(try_from_str = parse_types_list), default_value("u32,f64"))]
+    #[structopt(long,default_value("4"), parse(try_from_str = parse_types_list), default_value("u32,f64"))]
     /// OMs per record per keys and per passes per type u32/f64
     ///
     /// --om-types u32,f64

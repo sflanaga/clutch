@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use bit_vec::BitVec;
 use anyhow::{anyhow, Result};
 use snafu::Backtrace;
+use fnv::FnvHashMap;
 
 //use crate::bitset::BitSet;
 use crate::clutch::OmType::{TypeF64, TypeU32};
@@ -75,13 +76,13 @@ pub struct OmMeta {
 pub struct OmGroup {
     pub idx: GroupIdx,
     pub group: String,
-    pub om_map: BTreeMap<u32, OmMeta>,
+    pub om_map: FnvHashMap<u32, OmMeta>,
     pub om32_slots: usize,
     pub om64_slots: usize,
     pub omstr_slots: usize,
 }
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct ClutchKey {
     pub groupidx: u16,
     keys: String,
@@ -101,13 +102,18 @@ pub struct ClutchData {
     om_str: Vec<(u32, String)>,
 }
 
+/*
+This "inc_oms()" KILLED performance because it meant that the inner loops of all threads were
+constantly trying to write to the same memory location - which is not cached.
+
+Not only thread unsafe (I knew that much), but also very bad for performance.
+*/
 #[derive(Debug)]
 pub struct Stats {
     keys: usize,
     oms: usize,
     resizes: usize,
 }
-
 pub static mut CLUTCH_STATS: Stats = Stats {
     keys: 0,
     oms: 0,
@@ -156,6 +162,7 @@ pub struct ClutchStore {
 }
 
 
+
 impl ClutchKey {
     pub fn new(groupidx: u16, keys: String, time: u64, dur: u32, offset: i32) -> Self {
         ClutchKey {
@@ -166,9 +173,9 @@ impl ClutchKey {
             offset,
         }
     }
-    fn create_copy(self: &Self) -> Self {
-         Self::new(self.groupidx,self.keys.to_string(),self.time,self.dur,self.offset)
-    }
+    // fn create_copy(self: &Self) -> Self {
+    //      Self::new(self.groupidx,self.keys.to_string(),self.time,self.dur,self.offset)
+    // }
 
     pub fn get_mut_key(&mut self) -> &mut String {
         &mut self.keys
@@ -269,7 +276,7 @@ impl ClutchMeta {
         let g = OmGroup {
             idx: next_id,
             group: String::from(group),
-            om_map: BTreeMap::new(),
+            om_map: FnvHashMap::default(), // new(), // with_capacity_and_hasher(24000, Default::default()), // new(),
             om32_slots: 0,
             om64_slots: 0,
             omstr_slots: 0,
@@ -302,6 +309,12 @@ impl ClutchMeta {
         self.groups.get_mut(idx as usize)
     }
 
+    pub fn optimize(&mut self) {
+        for g in self.groups.iter_mut() {
+            g.om_map.shrink_to_fit();
+        }
+    }
+
 }
 impl ClutchStore {
     pub fn new() -> ClutchStore {
@@ -314,12 +327,12 @@ impl ClutchStore {
         self.clutches.clear();
     }
 
-    pub fn add_to_clutch(self: &mut Self, o32: usize, o64: usize, key: &ClutchKey) -> &mut ClutchData {
+    pub fn find_or_add_clutchdata(self: &mut Self, group: &OmGroup, key: &ClutchKey) -> &mut ClutchData {
         let mut add_key = 0;
 
         let val = self.clutches
-            .entry(key.create_copy())
-            .or_insert(ClutchData::new(o32, o64));
+            .entry(key.clone())
+            .or_insert(ClutchData::new(group.om32_slots, group.om64_slots));
 
         // let val = if self.clutches.contains_key(&key) {
         //     inc_keys();
@@ -352,7 +365,7 @@ impl ClutchData {
         let om64 = max(om64_size, RESIZE_INC);
         ClutchData {
             om_null32: BitVec::from_elem(om32_size, false),
-            om_null64: BitVec::from_elem(om32_size, false),
+            om_null64: BitVec::from_elem(om64_size, false),
             om32: vec![0u32; om32],
             om64: vec![0u64; om64],
             om_str: vec![],
@@ -433,10 +446,10 @@ impl ClutchData {
         } else {
             self.set_32(slot);
             if self.om32.len() < slot + 1 {
-                inc_resizes();
+                //inc_resizes();
                 self.om32.resize(slot + RESIZE_INC, 0);
             }
-            inc_oms();
+            //inc_oms();
             self.om32[slot] = val;
             Ok(())
         }
@@ -450,10 +463,10 @@ impl ClutchData {
         } else {
             self.set_64(slot);
             if self.om64.len() < slot + 1 {
-                inc_resizes();
+                // inc_resizes();
                 self.om64.resize(slot + RESIZE_INC, 0);
             }
-            inc_oms();
+            // inc_oms();
 
             unsafe { self.om64[slot] =  std::mem::transmute::<f64, u64>(val) };
             Ok(())

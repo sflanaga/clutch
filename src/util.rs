@@ -9,7 +9,7 @@ use std::convert::TryInto;
 use num_traits::AsPrimitive;
 use chrono::{DateTime, Local};
 use std::any::Any;
-use cpu_time::ProcessTime;
+use cpu_time::{ProcessTime, ThreadTime};
 
 pub fn rate<T: AsPrimitive<f64>>(cnt: T, dur: Duration) -> Box<dyn Display> {
     let cnt_f = cnt.as_();
@@ -65,7 +65,7 @@ impl PeriodicThread {
                     break;
                 }
             }
-            println!("exit thread");
+            //println!("exit thread");
         }));
     }
 
@@ -106,6 +106,8 @@ struct Stat {
     max: usize,
 }
 
+
+
 impl Stat {
     pub fn new(name: &str, verbosity: u32, max: usize) -> Stat {
         Stat {
@@ -116,6 +118,7 @@ impl Stat {
         }
     }
 }
+
 
 pub struct StatTrack {
     name: String,
@@ -164,11 +167,7 @@ impl StatTrack {
     pub fn print_stats(&mut self, last: bool) {
         let now = Instant::now();
         let mut buff= String::with_capacity(256);
-        if last {
-            write!(&mut buff, "{} [{}] LAST  ", self.name, StatTrack::now_str());
-        } else {
-            write!(&mut buff, "{} [{}] ", self.name, StatTrack::now_str());
-        }
+        write!(&mut buff, "{} [{}] ", self.name, StatTrack::now_str());
         for (a_stat, last_stat) in self.stats.iter().zip(self.last_stats.iter_mut()) {
             let thisval = a_stat.stat.load(Ordering::Relaxed);
             let (diff, dur) = if last {
@@ -193,20 +192,87 @@ impl StatTrack {
             if  per > 0f64 {
                 write!(&mut buff, " {:.2}%", per);
             }
+            add_mem_stats(&mut buff);
         }
-        println!("{}", &buff);
         if last {
-            println!("cpu time: {:.3}", self.proc_time.elapsed().as_secs_f64());
+            println!("{} -- LAST cpu time: {:.3}", &buff, self.proc_time.elapsed().as_secs_f64());
+        } else {
+            println!("{}", &buff);
         }
         self.last = now;
     }
 
-    pub fn start(mut self, dur: Duration) -> PeriodicThread {
-        let mut t = PeriodicThread::new(dur);
-        t.start(move|x| self.print_stats(x));
-        t
+    pub fn start(mut self, dur: Duration) -> Option<PeriodicThread> {
+        if dur.as_millis() > 0 {
+            let mut t = PeriodicThread::new(dur);
+            t.start(move |x| self.print_stats(x));
+            Some(t)
+        } else {
+            None
+        }
     }
 
 }
 
 
+#[cfg(target_family = "unix")]
+use jemalloc_ctl::{stats, epoch};
+
+#[cfg(target_family = "unix")]
+fn add_mem_stats(s: &mut String) {
+    epoch::advance().unwrap();
+    s.push_str(&format!(" mem: {}/{}", mem_metric_digit(stats::resident::read().unwrap(),4),
+                        mem_metric_digit(stats::active::read().unwrap(), 4)));
+}
+
+#[cfg(target_family = "windows")]
+fn add_mem_stats(s: &mut String) {
+    // do nothing on windows... maybe later?
+}
+
+
+fn mem_metric<'a>(v: usize) -> (f64, &'a str) {
+    const METRIC: [&str; 8] = ["B ", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"];
+
+    let mut size = 1usize << 10;
+    for e in &METRIC {
+        if v < size {
+            return ((v as f64 / (size >> 10) as f64) as f64, e);
+        }
+        size <<= 10;
+    }
+    (v as f64, "")
+}
+
+/// keep only a few significant digits of a simple float value
+fn sig_dig(v: f64, digits: usize) -> String {
+    let x = format!("{}", v);
+    let mut d = String::new();
+    let mut count = 0;
+    let mut found_pt = false;
+    for c in x.chars() {
+        if c != '.' {
+            count += 1;
+        } else {
+            if count >= digits {
+                break;
+            }
+            found_pt = true;
+        }
+
+        d.push(c);
+
+        if count >= digits && found_pt {
+            break;
+        }
+    }
+    d
+}
+
+pub fn mem_metric_digit(v: usize, sig: usize) -> String {
+    if v == 0 || v > std::usize::MAX / 2 {
+        return format!("{:>width$}", "unknown", width = sig + 3);
+    }
+    let vt = mem_metric(v);
+    format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width = sig + 1, )
+}
